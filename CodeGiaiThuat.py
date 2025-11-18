@@ -1,62 +1,96 @@
-import random
-from collections import defaultdict
+from typing import Dict, List, Tuple
 
-# Class WeightNormalizer
 class WeightNormalizer:
     def __init__(self):
-        self.__normalizedWeight = {
-            "purchase": (0.95, 1.00),
+        # mapping interaction -> (min, max)
+        self._normalized_weight = {
+            "purchase": (0.95, 1.0),
             "cart": (0.70, 0.85),
             "like": (0.50, 0.65),
             "view": (0.30, 0.45),
-            "skip": (0.00, 0.20)
+            "skip": (0.0, 0.15)
         }
 
-    def getNormalizedWeight(self, behavior):
-        minW, maxW = self.__normalizedWeight.get(behavior, (0.00, 0.00))
-        if minW == 0.0 and maxW == 0.0 and behavior not in self.__normalizedWeight:
-             return 0.0
-        return round(random.uniform(minW, maxW), 2)
+    def get_weight(self, interaction: str) -> float:
+        if interaction not in self._normalized_weight:
+            return 0.0
+        low, high = self._normalized_weight[interaction]
+        return (low + high) / 2
 
-# Class GraphEngine
+
 class GraphEngine:
     def __init__(self, normalizer: WeightNormalizer):
         self.normalizer = normalizer
-        self.userGraph = defaultdict(dict) # Đồ thị người dùng
-        self.productGraph = defaultdict(dict) # Đồ thị sản phẩm
-        self.userHistory = defaultdict(list) # Lịch sử hành vi người dùng
-        self.bestSellers = set() # Sản phẩm bán chạy nhất
+        self.graph: Dict[str, List[Tuple[str, float]]] = {}
 
-    # Thêm hành vi người dùng
-    def addAction(self, user, product, behavior):
-        self.userHistory[user].append((product, behavior))
-    # Xây dựng đồ thị
-    def buildGraph(self):
-        self.userGraph.clear()
-        self.productGraph.clear()
+    def build_graph(self, user_interactions: dict):
+        for user, interactions in user_interactions.items():
+            self.graph[user] = []
+            for product, itype in interactions:
+                w = self.normalizer.get_weight(itype)
+                self.graph[user].append((product, w))
+        return self.graph
 
-        # Xây dựng đồ thị người dùng
-        for user, actions in self.userHistory.items():
-            for product, behavior in actions:
-                weight = self.normalizer.getNormalizedWeight(behavior)
-                # Cập nhật Đồ thị Người dùng (U -> {P: W})
-                self.userGraph[user][product] = self.userGraph[user].get(product, 0) + weight
-            
-        # Xây dựng đồ thị sản phẩm
-        for user, products in self.userGraph.items():
-            for product, weight in products.items():
-                self.productGraph[product][user] = weight
 
-# Class Recommendation (Giải thuật Đề xuất)
 class Recommendation:
-    def __init__(self, graphEngine: GraphEngine):
-        self.graphEngine = graphEngine
+    def __init__(self, graph: dict):
+        self.graph = graph
 
-    def recommendProducts(self, user, topN=5):
-        if user not in self.graphEngine.userGraph:
-            return []
-        topProducts = sorted(self.graphEngine.userGraph[user].items(), key=lambda x: x[1], reverse=True)[:topN]
-        result = []
-        for product, weight in topProducts:
-            result.append((product, weight))
-        return result
+    def weighted_bfs(self, user):
+        from collections import defaultdict, deque
+        visited = set()
+        q = deque([user])
+        product_scores = defaultdict(float)
+
+        while q:
+            u = q.popleft()
+            if u in visited:
+                continue
+            visited.add(u)
+
+            if u not in self.graph:
+                continue
+
+            for product, weight in self.graph[u]:
+                product_scores[product] += weight
+
+        return sorted(product_scores.items(), key=lambda x: x[1], reverse=True)
+
+
+class UIDisplay:
+    """
+    Lớp mô phỏng giao diện trình duyệt.
+    Khi người dùng đăng nhập, hệ thống sẽ hiển thị danh sách sản phẩm đề xuất.
+    """
+    def show_recommendations(self, user: str, products: List[Tuple[str, float]]):
+        print(f"===== RECOMMENDATIONS FOR {user.upper()} =====")
+        for product, score in products:
+            print(f"- {product} (score: {score:.3f})")
+        print("==============================================")
+
+
+class AppCore:
+    def __init__(self):
+        self.normalizer = WeightNormalizer()
+        self.graph_engine = GraphEngine(self.normalizer)
+        self.recommender = None
+        self.ui = UIDisplay()
+
+    def run(self, user_interactions: dict, login_user: str):
+        # user_interactions: dữ liệu thực tế từ database hoặc file
+        graph = self.graph_engine.build_graph(user_interactions)
+        self.recommender = Recommendation(graph)
+
+        # Tính toán sản phẩm đề xuất cho người dùng đăng nhập
+        results = self.recommender.weighted_bfs(login_user)
+
+        # Hiển thị trên UI mô phỏng
+        self.ui.show_recommendations(login_user, results)
+
+
+if __name__ == "__main__":
+    # Ví dụ chạy thử với dữ liệu có sẵn
+    # Khi triển khai thực tế, AppCore.run() nhận dữ liệu đọc từ DB/file
+    data = {}
+    app = AppCore()
+    app.run(data, login_user="u001")
